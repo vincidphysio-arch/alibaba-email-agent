@@ -22,9 +22,12 @@ import gspread
 import re
 
 def remove_html_tags(text):
-    """Remove HTML tags to get clean text for AI"""
+    """Remove HTML tags AND their interior content for style/script to get clean text for AI"""
+    # Remove style and script blocks completely (content between tags)
+    text = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove all other tags
     clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
+    return re.sub(clean, ' ', text)
 
 # Simple .env loader if python-dotenv is not installed
 def load_env_file(filepath='.env'):
@@ -137,29 +140,29 @@ def analyze_with_gemini(email_body, email_subject):
             truncated_body = email_body[:max_body_len] + ("..." if len(email_body) > max_body_len else "")
             
             prompt = f"""
-Analyze this Alibaba communication email. The subject is often generic (e.g., "New seller message"), so you MUST read the EMAIL BODY to find real details.
+Analyze this Alibaba communication email. The subject is often generic (e.g., "New seller message"), so you MUST read the EMAIL MESSAGE BODY provided below to find real details.
 
-Task:
-1. **Vendor Name**: Extract the specific company or person name sending the message.
-   - Look for specific text like "From: [Name]", "Message from [Name]", or signature blocks.
-   - Examples: "Hangzhou Fuli Knitting Co.,ltd", "Jack", "Alice from XY Tech".
-   - Do NOT return "Unknown" unless the body is completely empty. If unsure, use the sender name from the "From" header logic.
+TASK:
+1. **Vendor Name**: Extract the specific company or person name sending this message.
+   - Look for specific text like "From: [Name]", "Message from [Name]", "Hi, I'm [Name] from [Company]", or signature blocks at the end.
+   - Do NOT return "Unknown" if there is ANY name visible. If the sender is mentioned as a person (e.g., "Jack"), use "Jack". If it's a company name (e.g., "Hangzhou Fuli Knitting Co.,ltd"), use that.
 
-2. **Summary**: Summarize the *actual conversation/message content*.
-   - Do NOT repeat the subject line.
-   - What is the seller asking or saying? (e.g., "Asking for PDF catalog", "Confirming shipping address", "Quoting $5.00/unit").
+2. **Conversation Summary**: Summarize the ACTUAL CONTENT of the message.
+   - What did they send? (e.g., "Sent a quote for 500 units", "Replied to your inquiry about solar panels", "Asking for your WhatsApp").
+   - Do NOT just repeat the subject line.
 
-3. **Quality Score**: 1-10 on business relevance/clarity.
+3. **Quality Score**: 1-10 on product-market fit (medical/procurement context).
 
-Data:
-- Subject: {email_subject}
-- Body Text: {truncated_body}
+DATA:
+- SUBJECT: {email_subject}
+- EMAIL BODY:
+{truncated_body}
 
-Respond ONLY in JSON:
+RESPOND ONLY IN JSON format:
 {{
-    "vendor": "Name Found in Body",
-    "summary": "Actual message content summary",
-    "quality_score": 8
+    "vendor": "Name Found",
+    "summary": "Specific summary of content",
+    "quality_score": 7
 }}
 """
             
@@ -182,11 +185,9 @@ Respond ONLY in JSON:
                 continue
                 
             print(f"Error analyzing with Gemini Code {attempt+1}: {e}")
-            return {
-                "vendor": "Unknown",
-                "summary": "Analysis failed or rate limited",
-                "quality_score": 0
-            }
+            # Raise the exception so the backfill script can catch it and retry later
+            # instead of writing "Unknown" to the sheet.
+            raise e
 
 def process_single_message(gmail_service, sheet, msg_id, existing_ids):
     """Fetch and process a single message by ID"""

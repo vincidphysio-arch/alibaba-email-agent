@@ -19,6 +19,12 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import google.generativeai as genai
 import gspread
+import re
+
+def remove_html_tags(text):
+    """Remove HTML tags to get clean text for AI"""
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
 
 # Simple .env loader if python-dotenv is not installed
 def load_env_file(filepath='.env'):
@@ -131,18 +137,28 @@ def analyze_with_gemini(email_body, email_subject):
             truncated_body = email_body[:max_body_len] + ("..." if len(email_body) > max_body_len else "")
             
             prompt = f"""
-Analyze this Alibaba communication email and extract:
-1. Vendor/Company Name (Look very carefully for the official company name, often found in the signature, footer, or after "From:" in the body, e.g., "Hangzhou Fuli Knitting Co.,ltd". If multiple names exist, pick the most specific vendor name.)
-2. Brief Summary (1-2 sentences covering the core message, e.g., price quote, weekend notice, or order update)
-3. Quality Score (1-10 based on professionalism and clarity)
+Analyze this Alibaba communication email. The subject is often generic (e.g., "New seller message"), so you MUST read the EMAIL BODY to find real details.
 
-Email Subject: {email_subject}
-Email Body (Full Content): {truncated_body}
+Task:
+1. **Vendor Name**: Extract the specific company or person name sending the message.
+   - Look for specific text like "From: [Name]", "Message from [Name]", or signature blocks.
+   - Examples: "Hangzhou Fuli Knitting Co.,ltd", "Jack", "Alice from XY Tech".
+   - Do NOT return "Unknown" unless the body is completely empty. If unsure, use the sender name from the "From" header logic.
 
-Respond ONLY in JSON format:
+2. **Summary**: Summarize the *actual conversation/message content*.
+   - Do NOT repeat the subject line.
+   - What is the seller asking or saying? (e.g., "Asking for PDF catalog", "Confirming shipping address", "Quoting $5.00/unit").
+
+3. **Quality Score**: 1-10 on business relevance/clarity.
+
+Data:
+- Subject: {email_subject}
+- Body Text: {truncated_body}
+
+Respond ONLY in JSON:
 {{
-    "vendor": "Full Company Name",
-    "summary": "1-sentence summary",
+    "vendor": "Name Found in Body",
+    "summary": "Actual message content summary",
     "quality_score": 8
 }}
 """
@@ -183,6 +199,11 @@ def process_single_message(gmail_service, sheet, msg_id, existing_ids):
         headers = message['payload']['headers']
         subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
         
+        # Skip GitHub Action failure notifications or other system noise
+        if "Run failed" in subject and "alibaba-email-agent" in subject:
+            print(f"Skipping system notification: {subject}")
+            return False
+
         body = ''
         if 'parts' in message['payload']:
             # Search for text/html first as it often contains the vendor name in the footer
@@ -205,6 +226,11 @@ def process_single_message(gmail_service, sheet, msg_id, existing_ids):
             if body_data:
                 body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
 
+        # Clean HTML tags from body before sending to AI
+        body = remove_html_tags(body)
+        # Collapse multiple spaces
+        body = re.sub(r'\s+', ' ', body).strip()
+
         print(f"Analyzing: {subject}")
         # Extract sender for the sheet
         sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
@@ -221,6 +247,24 @@ def process_single_message(gmail_service, sheet, msg_id, existing_ids):
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         analysis = analyze_with_gemini(body, subject)
+        
+        # Fallback: Extract vendor from subject if Gemini fails
+        if analysis['vendor'] == 'Unknown' or analysis['vendor'] == 'Full Company Name':
+            # Patterns: "Message from {Name}", "{Name} has a message", "New message! {Name} says"
+            subject_patterns = [
+                r"from\s+(.*?):",
+                r"from\s+(.*?)$",
+                r"^(.*?)\s+has a message",
+                r"^(.*?)\s+sent a message",
+                r"^(.*?)\s+just sent you",
+                r"message!\s+(.*?)\s+says"
+            ]
+            for pattern in subject_patterns:
+                match = re.search(pattern, subject, re.IGNORECASE)
+                if match:
+                    analysis['vendor'] = match.group(1).strip()
+                    print(f"Extracted vendor from subject: {analysis['vendor']}")
+                    break
         
         row = [timestamp, msg_id, analysis['vendor'], analysis['summary'], analysis['quality_score'], subject, sender]
         sheet.append_row(row)

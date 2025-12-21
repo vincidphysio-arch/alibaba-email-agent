@@ -12,7 +12,8 @@ import json
 import sys
 import argparse
 import time
-from datetime import datetime
+import email.utils
+from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -41,8 +42,9 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 TARGET_SENDERS = [
     'feedback@service.alibaba.com'
 ]
-MAX_RESULTS_PER_PAGE = 100
-GEMINI_RETRY_DELAY = 10 # Seconds between AI calls to stay within free tier limits
+MAX_RESULTS_PER_PAGE = 50
+GEMINI_RETRY_DELAY = 20 # increased to 20s to be safe
+MAX_EMAILS_PER_RUN = 10 # Limit batch size to prevent long running jobs and rate limits
 
 # OAuth Configuration
 OAUTH_CLIENT_ID = os.environ.get('OAUTH_CLIENT_ID')
@@ -130,17 +132,17 @@ def analyze_with_gemini(email_body, email_subject):
             
             prompt = f"""
 Analyze this Alibaba communication email and extract:
-1. Vendor/Company Name (Look for the official company name, e.g., "Hangzhou Fuli Knitting Co.,ltd")
+1. Vendor/Company Name (Look very carefully for the official company name, often found in the signature, footer, or after "From:" in the body, e.g., "Hangzhou Fuli Knitting Co.,ltd". If multiple names exist, pick the most specific vendor name.)
 2. Brief Summary (1-2 sentences covering the core message, e.g., price quote, weekend notice, or order update)
 3. Quality Score (1-10 based on professionalism and clarity)
 
 Email Subject: {email_subject}
-Email Body (HTML/Text): {truncated_body}
+Email Body (Full Content): {truncated_body}
 
 Respond ONLY in JSON format:
 {{
     "vendor": "Full Company Name",
-    "summary": "1-2 sentence summary",
+    "summary": "1-sentence summary",
     "quality_score": 8
 }}
 """
@@ -183,23 +185,42 @@ def process_single_message(gmail_service, sheet, msg_id, existing_ids):
         
         body = ''
         if 'parts' in message['payload']:
+            # Search for text/html first as it often contains the vendor name in the footer
             for part in message['payload']['parts']:
-                if part['mimeType'] == 'text/plain':
+                if part['mimeType'] == 'text/html':
                     body_data = part['body'].get('data', '')
                     if body_data:
-                        body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+                        body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
                         break
+            # Fallback to text/plain if html not found
+            if not body:
+                for part in message['payload']['parts']:
+                    if part['mimeType'] == 'text/plain':
+                        body_data = part['body'].get('data', '')
+                        if body_data:
+                            body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
+                            break
         else:
             body_data = message['payload']['body'].get('data', '')
             if body_data:
-                body = base64.urlsafe_b64decode(body_data).decode('utf-8')
+                body = base64.urlsafe_b64decode(body_data).decode('utf-8', errors='ignore')
 
         print(f"Analyzing: {subject}")
         # Extract sender for the sheet
         sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
         
+        # Extract actual email date from headers
+        date_str = next((h['value'] for h in headers if h['name'] == 'Date'), None)
+        if date_str:
+            try:
+                dt = email.utils.parsedate_to_datetime(date_str)
+                timestamp = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         analysis = analyze_with_gemini(body, subject)
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         row = [timestamp, msg_id, analysis['vendor'], analysis['summary'], analysis['quality_score'], subject, sender]
         sheet.append_row(row)
@@ -273,6 +294,10 @@ def fetch_and_process_emails(target_id=None):
             for msg in messages:
                 if process_single_message(gmail_service, sheet, msg['id'], existing_ids):
                     processed_count += 1
+                    if processed_count >= MAX_EMAILS_PER_RUN:
+                        print(f"Reached batch limit of {MAX_EMAILS_PER_RUN}. Stopping.")
+                        return
+                        
                     print(f"Waiting {GEMINI_RETRY_DELAY}s for rate limit...")
                     time.sleep(GEMINI_RETRY_DELAY) # Rate limit delay for Gemini free tier
                     

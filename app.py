@@ -18,24 +18,23 @@ st.markdown("""
 <style>
     /* Main background */
     .stApp {
-        background: radial-gradient(circle at top right, #1a1a2e, #16213e, #0f3460);
-        color: #e94560;
+        background: #ffffff;
+        color: #1a1a2e;
     }
     
     /* Card-like containers for metrics */
     div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
         padding: 20px;
         border-radius: 15px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         transition: transform 0.3s ease;
     }
     
     div[data-testid="stMetric"]:hover {
         transform: translateY(-5px);
-        background: rgba(255, 255, 255, 0.08);
+        background: #ffffff;
         border: 1px solid #e94560;
     }
 
@@ -43,29 +42,34 @@ st.markdown("""
     h1, h2, h3 {
         font-family: 'Inter', sans-serif;
         font-weight: 700 !important;
-        background: linear-gradient(90deg, #e94560, #ffffff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #1a1a2e !important;
+        background: none !important;
+        -webkit-text-fill-color: initial !important;
     }
     
     /* Sidebar styling */
     section[data-testid="stSidebar"] {
-        background-color: rgba(15, 52, 96, 0.95) !important;
-        border-right: 1px solid rgba(233, 69, 96, 0.2);
+        background-color: #f1f3f5 !important;
+        border-right: 1px solid #dee2e6;
     }
     
     /* Dataframe/Table styling */
     .stDataFrame {
-        background: rgba(255, 255, 255, 0.03);
+        background: #ffffff;
         border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid #dee2e6;
     }
     
     /* Info/Success messages */
     .stAlert {
-        background: rgba(233, 69, 96, 0.1) !important;
-        color: #e94560 !important;
-        border: 1px solid rgba(233, 69, 96, 0.3) !important;
+        background: #fff5f5 !important;
+        color: #c92a2a !important;
+        border: 1px solid #ffa8a8 !important;
+    }
+    
+    /* Adjust text colors for visibility */
+    .stMarkdown, p, span {
+        color: #1a1a2e !important;
     }
 </style>
 """, unsafe_allow_html=True)

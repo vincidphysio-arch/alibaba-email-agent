@@ -39,10 +39,7 @@ load_env_file()
 SHEET_ID = os.environ.get('SHEET_ID', '1kSWyTwYxiNYMG6IN_2GWcN4EBsVsTEmm1m_RTuIQ62o')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 TARGET_SENDERS = [
-    'feedback@service.alibaba.com',
-    'tradeservice@service.alibaba.com',
-    'rfq@service.alibaba.com',
-    'message@service.alibaba.com'
+    'feedback@service.alibaba.com'
 ]
 MAX_RESULTS_PER_PAGE = 100
 GEMINI_RETRY_DELAY = 10 # Seconds between AI calls to stay within free tier limits
@@ -132,18 +129,18 @@ def analyze_with_gemini(email_body, email_subject):
             truncated_body = email_body[:max_body_len] + ("..." if len(email_body) > max_body_len else "")
             
             prompt = f"""
-Analyze this Alibaba vendor quote email and extract:
-1. Vendor/Company Name
-2. Brief Summary (2-3 sentences covering product, price, MOQ, shipping)
-3. Quality Score (1-10 based on professionalism, clarity, completeness)
+Analyze this Alibaba communication email and extract:
+1. Vendor/Company Name (Look for the official company name, e.g., "Hangzhou Fuli Knitting Co.,ltd")
+2. Brief Summary (1-2 sentences covering the core message, e.g., price quote, weekend notice, or order update)
+3. Quality Score (1-10 based on professionalism and clarity)
 
 Email Subject: {email_subject}
-Email Body: {truncated_body}
+Email Body (HTML/Text): {truncated_body}
 
-Respond in JSON format:
+Respond ONLY in JSON format:
 {{
-    "vendor": "vendor name",
-    "summary": "2-3 sentence summary",
+    "vendor": "Full Company Name",
+    "summary": "1-2 sentence summary",
     "quality_score": 8
 }}
 """
@@ -249,8 +246,8 @@ def fetch_and_process_emails(target_id=None):
             return
 
         # Pagination loop for broader search
-        # Refined query to avoid repository notifications and system emails
-        query = 'from:(@service.alibaba.com) ("quote" OR "RFQ" OR "order" OR "inquiry" OR "message")'
+        # Refined query to specifically target feedback/communication emails
+        query = 'from:feedback@service.alibaba.com'
         print(f"Searching Gmail with query: {query}")
         
         page_token = None

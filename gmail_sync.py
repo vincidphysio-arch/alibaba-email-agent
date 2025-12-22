@@ -359,9 +359,20 @@ def fetch_and_process_emails(target_id=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Gmail Sync for Alibaba Agent')
     parser.add_argument('--id', help='Specific Gmail Message ID to process')
+    parser.add_argument('--clear', action='store_true', help='Clear sheet before syncing')
     args = parser.parse_args()
 
     print(f"--- Alibaba Sync Started at {datetime.now().strftime('%H:%M:%S')} ---")
+    
+    if args.clear:
+        print("Clearing Google Sheet...")
+        gc = get_sheets_service()
+        sh = gc.open_by_key(SHEET_ID).sheet1
+        sh.resize(rows=1)
+        headers = ['Timestamp', 'Email ID', 'Vendor', 'Summary', 'Quality Score', 'Subject', 'From']
+        sh.update(values=[headers], range_name='A1:G1')
+        print("Sheet cleared.\n")
+    
     try:
         fetch_and_process_emails(target_id=args.id)
     except Exception as e:

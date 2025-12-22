@@ -3,7 +3,7 @@ name: Sync Alibaba Vendor Emails
 on:
   schedule:
     # Run every minute
-    - cron: '* * * * *'
+    # - cron: '* * * * *'
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
